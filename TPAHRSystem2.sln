@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36121.58 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TPAHRSystem2", "TPAHRSystem2\TPAHRSystem2.csproj", "{EE9BF0ED-9896-47BE-BB47-B426D70B8FE3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EE9BF0ED-9896-47BE-BB47-B426D70B8FE3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EE9BF0ED-9896-47BE-BB47-B426D70B8FE3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EE9BF0ED-9896-47BE-BB47-B426D70B8FE3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EE9BF0ED-9896-47BE-BB47-B426D70B8FE3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {FD4FD81B-E9FE-4FDD-BACC-24E74140F7C4}
+	EndGlobalSection
+EndGlobal
