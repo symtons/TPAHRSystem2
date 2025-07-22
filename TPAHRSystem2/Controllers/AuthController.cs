@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Cors;
 using TPAHRSystemSimple.Data;
 using TPAHRSystemSimple.Models;
 using TPAHRSystemSimple.Services;
@@ -8,6 +9,7 @@ namespace TPAHRSystemSimple.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [EnableCors("AllowReactApp")] // Enable CORS for this controller
     public class AuthController : ControllerBase
     {
         private readonly AuthService _authService;
@@ -31,7 +33,9 @@ namespace TPAHRSystemSimple.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-             if (!ModelState.IsValid)
+            try
+            {
+                if (!ModelState.IsValid)
                 {
                     return BadRequest(ApiResponse<object>.ErrorResult("Invalid input data"));
                 }
@@ -49,7 +53,12 @@ namespace TPAHRSystemSimple.Controllers
 
                 _logger.LogWarning($"Login failed for user: {request.Email} - {result.Message}");
                 return Unauthorized(result);
-          
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error during login for email: {request.Email}");
+                return StatusCode(500, ApiResponse<object>.ErrorResult("An error occurred during login"));
+            }
         }
 
         /// <summary>

@@ -96,11 +96,15 @@ builder.Services.AddCors(options =>
                 "http://localhost:3000",
                 "https://localhost:3000",
                 "http://localhost:3001",
-                "https://localhost:3001"
+                "https://localhost:3001",
+                "http://127.0.0.1:3000",
+                "https://127.0.0.1:3000"
             )
             .AllowAnyMethod()
             .AllowAnyHeader()
-            .AllowCredentials();
+            .AllowCredentials()
+            .SetIsOriginAllowed(origin => true) // Allow any origin for development
+            .WithExposedHeaders("Authorization", "X-Session-Token");
     });
 });
 
