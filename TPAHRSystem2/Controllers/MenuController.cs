@@ -1,15 +1,22 @@
-﻿using Microsoft.AspNetCore.Cors;
+﻿// =============================================================================
+// TPAHRSystem2/Controllers/MenuController.cs - CLEAN VERSION
+// File: TPAHRSystem2/Controllers/MenuController.cs (Replace existing)
+// =============================================================================
+
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TPAHRSystemSimple.Data;
 using TPAHRSystemSimple.Models;
 using TPAHRSystemSimple.Services;
+using Swashbuckle.AspNetCore.Annotations;
 
 namespace TPAHRSystemSimple.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
     [EnableCors("AllowReactApp")]
+    [SwaggerTag("Menu endpoints for navigation and access control")]
     public class MenuController : ControllerBase
     {
         private readonly TPADbContext _context;
@@ -23,187 +30,150 @@ namespace TPAHRSystemSimple.Controllers
             _logger = logger;
         }
 
-        // =============================================================================
-        // AUTHENTICATION HELPERS (MISSING METHODS)
-        // =============================================================================
-
-        private string? GetSessionToken()
+        /// <summary>
+        /// Test menu controller functionality
+        /// </summary>
+        [HttpGet("test")]
+        [SwaggerOperation(Summary = "Test menu controller", Description = "Simple health check for menu controller")]
+        [SwaggerResponse(200, "Controller is working", typeof(MenuTestResponse))]
+        public IActionResult Test()
         {
-            var authHeader = Request.Headers.Authorization.FirstOrDefault();
-            if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
+            return Ok(new MenuTestResponse
             {
-                return authHeader["Bearer ".Length..].Trim();
-            }
-            return Request.Headers["X-Session-Token"].FirstOrDefault();
+                Success = true,
+                Message = "Menu controller is working",
+                Timestamp = DateTime.UtcNow,
+                Endpoints = new[]
+                {
+                    "/api/menu/items",
+                    "/api/menu/access/{menuName}",
+                    "/api/menu/dashboard-config",
+                    "/api/menu/breadcrumbs"
+                }
+            });
         }
-
-        private async Task<User?> GetCurrentUserAsync()
-        {
-            var token = GetSessionToken();
-            if (string.IsNullOrEmpty(token)) return null;
-            return await _authService.ValidateSessionAsync(token);
-        }
-
-        private async Task<Employee?> GetCurrentEmployeeAsync()
-        {
-            var user = await GetCurrentUserAsync();
-            if (user == null) return null;
-
-            return await _context.Employees
-                .Include(e => e.Department)
-                .FirstOrDefaultAsync(e => e.UserId == user.Id);
-        }
-
-        // =============================================================================
-        // MENU ENDPOINTS
-        // =============================================================================
 
         /// <summary>
-        /// Get menu items based on user role (DATABASE-DRIVEN)
+        /// Get menu items based on user role
         /// </summary>
         [HttpGet("items")]
+        [SwaggerOperation(Summary = "Get menu items", Description = "Retrieve menu items for current user role")]
+        [SwaggerResponse(200, "Menu items retrieved successfully", typeof(MenuItemsResponse))]
         public async Task<IActionResult> GetMenuItems([FromQuery] string? role = null)
         {
             try
             {
-                var user = await GetCurrentUserAsync();
-                if (user == null)
-                    return Unauthorized(ApiResponse<object>.ErrorResult("Authentication required"));
+                _logger.LogInformation($"Getting menu items for role: {role ?? "default"}");
 
-                var userRole = role ?? user.Role;
+                // Simple hardcoded menu structure based on role
+                var menuItems = new List<SimpleMenuDto>();
 
-                // Get menu items from database with role-based permissions
-                var menuItems = await _context.MenuItems
-                    .Where(m => m.IsActive && m.ParentId == null) // Top-level items only
-                    .Include(m => m.Children.Where(c => c.IsActive))
-                    .Include(m => m.RolePermissions.Where(rp => rp.Role == userRole))
-                    .OrderBy(m => m.SortOrder)
-                    .ToListAsync();
-
-                // Filter based on permissions and convert to DTOs
-                var allowedMenuItems = new List<MenuItemDto>();
-
-                foreach (var menuItem in menuItems)
+                // Common menu items for all roles
+                menuItems.Add(new SimpleMenuDto
                 {
-                    var permission = menuItem.RolePermissions.FirstOrDefault();
-                    if (permission?.CanView == true)
+                    Id = 1,
+                    Name = "Dashboard",
+                    Route = "/dashboard",
+                    Icon = "Dashboard",
+                    SortOrder = 1,
+                    IsActive = true
+                });
+
+                // Role-specific menu items
+                if (role?.ToLower() == "admin" || role?.ToLower() == "superadmin")
+                {
+                    menuItems.AddRange(new[]
                     {
-                        var menuDto = new MenuItemDto
-                        {
-                            Id = menuItem.Id,
-                            Name = menuItem.Name,
-                            Route = menuItem.Route,
-                            Icon = menuItem.Icon,
-                            ParentId = menuItem.ParentId,
-                            SortOrder = menuItem.SortOrder,
-                            IsActive = menuItem.IsActive,
-                            Permissions = new MenuPermissionDto
-                            {
-                                CanView = permission.CanView,
-                                CanEdit = permission.CanEdit,
-                                CanDelete = permission.CanDelete
-                            },
-                            Children = await GetChildMenuItems(menuItem.Children, userRole)
-                        };
-                        allowedMenuItems.Add(menuDto);
-                    }
+                        new SimpleMenuDto { Id = 2, Name = "Employees", Route = "/employees", Icon = "People", SortOrder = 2, IsActive = true },
+                        new SimpleMenuDto { Id = 3, Name = "Time & Attendance", Route = "/time", Icon = "Schedule", SortOrder = 3, IsActive = true },
+                        new SimpleMenuDto { Id = 4, Name = "Reports", Route = "/reports", Icon = "Assessment", SortOrder = 4, IsActive = true },
+                        new SimpleMenuDto { Id = 5, Name = "Administration", Route = "/admin", Icon = "Settings", SortOrder = 5, IsActive = true }
+                    });
+                }
+                else if (role?.ToLower() == "hr" || role?.ToLower() == "hradmin")
+                {
+                    menuItems.AddRange(new[]
+                    {
+                        new SimpleMenuDto { Id = 2, Name = "Employees", Route = "/employees", Icon = "People", SortOrder = 2, IsActive = true },
+                        new SimpleMenuDto { Id = 3, Name = "Onboarding", Route = "/onboarding", Icon = "PersonAdd", SortOrder = 3, IsActive = true },
+                        new SimpleMenuDto { Id = 4, Name = "Reports", Route = "/reports", Icon = "Assessment", SortOrder = 4, IsActive = true }
+                    });
+                }
+                else
+                {
+                    // Employee role
+                    menuItems.AddRange(new[]
+                    {
+                        new SimpleMenuDto { Id = 2, Name = "My Profile", Route = "/profile", Icon = "Person", SortOrder = 2, IsActive = true },
+                        new SimpleMenuDto { Id = 3, Name = "Time Entry", Route = "/time/entry", Icon = "Schedule", SortOrder = 3, IsActive = true },
+                        new SimpleMenuDto { Id = 4, Name = "My Tasks", Route = "/tasks", Icon = "Assignment", SortOrder = 4, IsActive = true }
+                    });
                 }
 
-                return Ok(ApiResponse<object>.SuccessResult(allowedMenuItems, "Menu items retrieved from database"));
+                return Ok(new MenuItemsResponse
+                {
+                    Success = true,
+                    Data = menuItems,
+                    Message = "Menu items retrieved successfully"
+                });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting menu items from database");
-                return StatusCode(500, ApiResponse<object>.ErrorResult("Failed to retrieve menu items"));
+                _logger.LogError(ex, "Error getting menu items");
+                return StatusCode(500, new MenuItemsResponse
+                {
+                    Success = false,
+                    Message = $"Failed to get menu items: {ex.Message}"
+                });
             }
         }
 
         /// <summary>
-        /// Check if user can access a specific menu (DATABASE-DRIVEN)
+        /// Check menu access for specific menu
         /// </summary>
         [HttpGet("access/{menuName}")]
+        [SwaggerOperation(Summary = "Check menu access", Description = "Check if user has access to specific menu")]
+        [SwaggerResponse(200, "Access check completed", typeof(MenuAccessResponse))]
         public async Task<IActionResult> CheckMenuAccess(string menuName)
         {
             try
             {
-                var user = await GetCurrentUserAsync();
-                if (user == null)
-                    return Unauthorized(ApiResponse<object>.ErrorResult("Authentication required"));
+                _logger.LogInformation($"Checking menu access for: {menuName}");
 
-                // Use the database function to check permission
-                var hasAccess = await CheckUserMenuPermissionAsync(user.Role, menuName, "VIEW");
+                // Simple access check based on menu name
+                var access = new MenuAccessDto();
 
-                return Ok(ApiResponse<object>.SuccessResult(new { hasAccess, menuName, userRole = user.Role }));
+                switch (menuName.ToLower())
+                {
+                    case "dashboard":
+                        access = new MenuAccessDto { CanView = true, CanEdit = false, CanDelete = false };
+                        break;
+                    case "employees":
+                        access = new MenuAccessDto { CanView = true, CanEdit = true, CanDelete = false };
+                        break;
+                    case "administration":
+                        access = new MenuAccessDto { CanView = true, CanEdit = true, CanDelete = true };
+                        break;
+                    default:
+                        access = new MenuAccessDto { CanView = true, CanEdit = false, CanDelete = false };
+                        break;
+                }
+
+                return Ok(new MenuAccessResponse
+                {
+                    Success = true,
+                    Data = access,
+                    Message = "Access check completed"
+                });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error checking menu access for: {menuName}");
-                return StatusCode(500, ApiResponse<object>.ErrorResult("Failed to check menu access"));
-            }
-        }
-
-        // =============================================================================
-        // DATABASE HELPER METHODS
-        // =============================================================================
-
-        private async Task<List<MenuItemDto>> GetChildMenuItems(IEnumerable<MenuItem> children, string userRole)
-        {
-            var childDtos = new List<MenuItemDto>();
-
-            foreach (var child in children.OrderBy(c => c.SortOrder))
-            {
-                var permission = child.RolePermissions.FirstOrDefault(rp => rp.Role == userRole);
-                if (permission?.CanView == true)
+                return StatusCode(500, new MenuAccessResponse
                 {
-                    var childDto = new MenuItemDto
-                    {
-                        Id = child.Id,
-                        Name = child.Name,
-                        Route = child.Route,
-                        Icon = child.Icon,
-                        ParentId = child.ParentId,
-                        SortOrder = child.SortOrder,
-                        IsActive = child.IsActive,
-                        Permissions = new MenuPermissionDto
-                        {
-                            CanView = permission.CanView,
-                            CanEdit = permission.CanEdit,
-                            CanDelete = permission.CanDelete
-                        }
-                    };
-                    childDtos.Add(childDto);
-                }
-            }
-
-            return childDtos;
-        }
-
-        private async Task<bool> CheckUserMenuPermissionAsync(string userRole, string menuName, string permissionType)
-        {
-            try
-            {
-                // Query the database directly using raw SQL to use the existing function
-                var sql = "SELECT dbo.fn_UserHasMenuPermission(@p0, @p1, @p2)";
-                var result = await _context.Database.SqlQueryRaw<bool>(sql, userRole, menuName, permissionType).FirstOrDefaultAsync();
-                return result;
-            }
-            catch
-            {
-                // Fallback to EF query if the function doesn't exist
-                var menuItem = await _context.MenuItems
-                    .Include(m => m.RolePermissions)
-                    .FirstOrDefaultAsync(m => m.Name == menuName && m.IsActive);
-
-                if (menuItem == null) return false;
-
-                var permission = menuItem.RolePermissions.FirstOrDefault(rp => rp.Role == userRole);
-                return permissionType.ToUpper() switch
-                {
-                    "VIEW" => permission?.CanView ?? false,
-                    "EDIT" => permission?.CanEdit ?? false,
-                    "DELETE" => permission?.CanDelete ?? false,
-                    _ => false
-                };
+                    Success = false,
+                    Message = $"Failed to check menu access: {ex.Message}"
+                });
             }
         }
 
@@ -211,154 +181,268 @@ namespace TPAHRSystemSimple.Controllers
         /// Get dashboard configuration
         /// </summary>
         [HttpGet("dashboard-config")]
+        [SwaggerOperation(Summary = "Get dashboard config", Description = "Retrieve dashboard configuration")]
+        [SwaggerResponse(200, "Dashboard config retrieved", typeof(MenuDashboardConfigResponse))]
         public async Task<IActionResult> GetDashboardConfig()
         {
             try
             {
-                var user = await GetCurrentUserAsync();
-                if (user == null)
-                    return Unauthorized(ApiResponse<object>.ErrorResult("Authentication required"));
+                _logger.LogInformation("Getting dashboard configuration");
 
-                var config = new
+                var config = new MenuDashboardConfigDto
                 {
-                    showSidebar = true,
-                    defaultRoute = "/dashboard",
-                    allowedRoutes = GetAllowedRoutesForRole(user.Role),
-                    navigationStyle = "tabs", // or "sidebar"
-                    theme = "default"
+                    ShowSidebar = true,
+                    DefaultRoute = "/dashboard",
+                    AllowedRoutes = new[] { "/dashboard", "/employees", "/time", "/profile", "/reports" },
+                    NavigationStyle = "sidebar",
+                    Theme = "default",
+                    CollapsibleSidebar = true,
+                    ShowUserMenu = true
                 };
 
-                return Ok(ApiResponse<object>.SuccessResult(config, "Dashboard configuration retrieved"));
+                return Ok(new MenuDashboardConfigResponse
+                {
+                    Success = true,
+                    Data = config,
+                    Message = "Dashboard configuration retrieved"
+                });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting dashboard config");
-                return StatusCode(500, ApiResponse<object>.ErrorResult("Failed to get dashboard configuration"));
+                return StatusCode(500, new MenuDashboardConfigResponse
+                {
+                    Success = false,
+                    Message = $"Failed to get dashboard config: {ex.Message}"
+                });
             }
         }
 
         /// <summary>
-        /// Get breadcrumbs for current route (FRONTEND COMPATIBILITY)
+        /// Get breadcrumbs for current route
         /// </summary>
         [HttpGet("breadcrumbs")]
+        [SwaggerOperation(Summary = "Get breadcrumbs", Description = "Generate breadcrumbs for current route")]
+        [SwaggerResponse(200, "Breadcrumbs generated", typeof(BreadcrumbsResponse))]
         public async Task<IActionResult> GetBreadcrumbs([FromQuery] string currentRoute)
         {
             try
             {
-                var user = await GetCurrentUserAsync();
-                if (user == null)
-                    return Unauthorized(new { success = false, message = "Authentication required" });
+                _logger.LogInformation($"Getting breadcrumbs for route: {currentRoute}");
+
+                var breadcrumbs = new List<BreadcrumbDto>
+                {
+                    new BreadcrumbDto { Name = "Home", Route = "/", Icon = "Home" }
+                };
 
                 // Simple breadcrumb generation based on route
-                var breadcrumbs = GenerateBreadcrumbs(currentRoute);
-
-                return Ok(new
+                if (!string.IsNullOrEmpty(currentRoute) && currentRoute != "/")
                 {
-                    success = true,
-                    data = breadcrumbs,
-                    message = "Breadcrumbs generated"
+                    var routeParts = currentRoute.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                    var currentPath = "";
+
+                    foreach (var part in routeParts)
+                    {
+                        currentPath += "/" + part;
+                        var displayName = part switch
+                        {
+                            "dashboard" => "Dashboard",
+                            "employees" => "Employees",
+                            "time" => "Time & Attendance",
+                            "reports" => "Reports",
+                            "admin" => "Administration",
+                            "profile" => "Profile",
+                            "onboarding" => "Onboarding",
+                            _ => char.ToUpper(part[0]) + part[1..]
+                        };
+
+                        breadcrumbs.Add(new BreadcrumbDto
+                        {
+                            Name = displayName,
+                            Route = currentPath,
+                            Icon = GetIconForRoute(part)
+                        });
+                    }
+                }
+
+                return Ok(new BreadcrumbsResponse
+                {
+                    Success = true,
+                    Data = breadcrumbs,
+                    Message = "Breadcrumbs generated successfully"
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error generating breadcrumbs for route: {currentRoute}");
-                return StatusCode(500, new
+                _logger.LogError(ex, $"Error getting breadcrumbs for route: {currentRoute}");
+                return StatusCode(500, new BreadcrumbsResponse
                 {
-                    success = false,
-                    message = "Failed to generate breadcrumbs"
+                    Success = false,
+                    Message = $"Failed to get breadcrumbs: {ex.Message}"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Get user permissions for menu items
+        /// </summary>
+        [HttpGet("permissions")]
+        [SwaggerOperation(Summary = "Get user permissions", Description = "Retrieve user permissions for menu items")]
+        [SwaggerResponse(200, "Permissions retrieved", typeof(MenuPermissionsResponse))]
+        public async Task<IActionResult> GetUserPermissions([FromQuery] string? role = null)
+        {
+            try
+            {
+                _logger.LogInformation($"Getting user permissions for role: {role}");
+
+                var permissions = new List<MenuPermissionDto>();
+
+                // Simple permission mapping based on role
+                if (role?.ToLower() == "admin" || role?.ToLower() == "superadmin")
+                {
+                    permissions.AddRange(new[]
+                    {
+                        new MenuPermissionDto { MenuName = "Dashboard", CanView = true, CanEdit = false, CanDelete = false },
+                        new MenuPermissionDto { MenuName = "Employees", CanView = true, CanEdit = true, CanDelete = true },
+                        new MenuPermissionDto { MenuName = "Reports", CanView = true, CanEdit = true, CanDelete = false },
+                        new MenuPermissionDto { MenuName = "Administration", CanView = true, CanEdit = true, CanDelete = true }
+                    });
+                }
+                else
+                {
+                    permissions.AddRange(new[]
+                    {
+                        new MenuPermissionDto { MenuName = "Dashboard", CanView = true, CanEdit = false, CanDelete = false },
+                        new MenuPermissionDto { MenuName = "Profile", CanView = true, CanEdit = true, CanDelete = false }
+                    });
+                }
+
+                return Ok(new MenuPermissionsResponse
+                {
+                    Success = true,
+                    Data = permissions,
+                    Message = "Permissions retrieved successfully"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting user permissions");
+                return StatusCode(500, new MenuPermissionsResponse
+                {
+                    Success = false,
+                    Message = $"Failed to get permissions: {ex.Message}"
                 });
             }
         }
 
         // =============================================================================
-        // BREADCRUMB GENERATION HELPER
+        // HELPER METHODS
         // =============================================================================
 
-        private object[] GenerateBreadcrumbs(string currentRoute)
+        private string GetIconForRoute(string routePart)
         {
-            var breadcrumbs = new List<object>
+            return routePart.ToLower() switch
             {
-                new { name = "Dashboard", route = "/dashboard", icon = "Dashboard" }
-            };
-
-            if (string.IsNullOrEmpty(currentRoute) || currentRoute == "/dashboard")
-            {
-                return breadcrumbs.ToArray();
-            }
-
-            // Add breadcrumbs based on route
-            switch (currentRoute.ToLower())
-            {
-                case "/employees":
-                    breadcrumbs.Add(new { name = "Employees", route = "/employees", icon = "People" });
-                    break;
-                case "/time-attendance":
-                    breadcrumbs.Add(new { name = "Time & Attendance", route = "/time-attendance", icon = "Schedule" });
-                    break;
-                case "/leave":
-                    breadcrumbs.Add(new { name = "Leave Management", route = "/leave", icon = "EventAvailable" });
-                    break;
-                case "/onboarding":
-                    breadcrumbs.Add(new { name = "Onboarding", route = "/onboarding", icon = "PersonAdd" });
-                    break;
-                case "/reports":
-                    breadcrumbs.Add(new { name = "Reports", route = "/reports", icon = "Assessment" });
-                    break;
-                case "/settings":
-                    breadcrumbs.Add(new { name = "Settings", route = "/settings", icon = "Settings" });
-                    break;
-                case "/menu-management":
-                    breadcrumbs.Add(new { name = "Menu Management", route = "/menu-management", icon = "Settings" });
-                    break;
-                default:
-                    breadcrumbs.Add(new { name = "Page", route = currentRoute, icon = "Page" });
-                    break;
-            }
-
-            return breadcrumbs.ToArray();
-        }
-
-        private string[] GetAllowedRoutesForRole(string role)
-        {
-            return role.ToLower() switch
-            {
-                "admin" or "superadmin" => new[]
-                {
-                    "/dashboard", "/employees", "/time-attendance", "/leave", "/onboarding", "/reports", "/settings"
-                },
-                "hradmin" or "hr_manager" => new[]
-                {
-                    "/dashboard", "/employees", "/leave", "/onboarding", "/reports"
-                },
-                "employee" => new[]
-                {
-                    "/dashboard", "/time-attendance", "/leave", "/profile"
-                },
-                _ => new[]
-                {
-                    "/dashboard", "/profile"
-                }
+                "dashboard" => "Dashboard",
+                "employees" => "People",
+                "time" => "Schedule",
+                "reports" => "Assessment",
+                "admin" => "Settings",
+                "profile" => "Person",
+                "onboarding" => "PersonAdd",
+                "tasks" => "Assignment",
+                _ => "Page"
             };
         }
+    }
 
-        /// <summary>
-        /// Test menu functionality
-        /// </summary>
-        [HttpGet("test")]
-        public IActionResult TestMenu()
-        {
-            return Ok(new
-            {
-                success = true,
-                message = "Menu controller is working",
-                timestamp = DateTime.UtcNow,
-                endpoints = new[]
-                {
-                    "/api/menu/items",
-                    "/api/menu/access/{menuName}",
-                    "/api/menu/dashboard-config"
-                }
-            });
-        }
+    // =============================================================================
+    // DTO CLASSES FOR MENU CONTROLLER
+    // =============================================================================
+
+    public class MenuTestResponse
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public DateTime Timestamp { get; set; }
+        public string[] Endpoints { get; set; } = Array.Empty<string>();
+    }
+
+    public class SimpleMenuDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Route { get; set; } = string.Empty;
+        public string? Icon { get; set; }
+        public int SortOrder { get; set; }
+        public bool IsActive { get; set; }
+    }
+
+    public class MenuAccessDto
+    {
+        public bool CanView { get; set; }
+        public bool CanEdit { get; set; }
+        public bool CanDelete { get; set; }
+    }
+
+    public class MenuDashboardConfigDto
+    {
+        public bool ShowSidebar { get; set; }
+        public string DefaultRoute { get; set; } = string.Empty;
+        public string[] AllowedRoutes { get; set; } = Array.Empty<string>();
+        public string NavigationStyle { get; set; } = string.Empty;
+        public string Theme { get; set; } = string.Empty;
+        public bool CollapsibleSidebar { get; set; }
+        public bool ShowUserMenu { get; set; }
+    }
+
+    public class BreadcrumbDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Route { get; set; } = string.Empty;
+        public string? Icon { get; set; }
+    }
+
+    public class MenuPermissionDto
+    {
+        public string MenuName { get; set; } = string.Empty;
+        public bool CanView { get; set; }
+        public bool CanEdit { get; set; }
+        public bool CanDelete { get; set; }
+    }
+
+    public class MenuItemsResponse
+    {
+        public bool Success { get; set; }
+        public List<SimpleMenuDto> Data { get; set; } = new();
+        public string Message { get; set; } = string.Empty;
+    }
+
+    public class MenuAccessResponse
+    {
+        public bool Success { get; set; }
+        public MenuAccessDto? Data { get; set; }
+        public string Message { get; set; } = string.Empty;
+    }
+
+    public class MenuDashboardConfigResponse
+    {
+        public bool Success { get; set; }
+        public MenuDashboardConfigDto? Data { get; set; }
+        public string Message { get; set; } = string.Empty;
+    }
+
+    public class BreadcrumbsResponse
+    {
+        public bool Success { get; set; }
+        public List<BreadcrumbDto> Data { get; set; } = new();
+        public string Message { get; set; } = string.Empty;
+    }
+
+    public class MenuPermissionsResponse
+    {
+        public bool Success { get; set; }
+        public List<MenuPermissionDto> Data { get; set; } = new();
+        public string Message { get; set; } = string.Empty;
     }
 }

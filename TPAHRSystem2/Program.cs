@@ -1,4 +1,10 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿// =============================================================================
+// TPAHRSystem2/Program.cs - FIXED CORS VERSION
+// File: TPAHRSystem2/Program.cs (Replace existing)
+// This fixes the CORS "Missing Allow Origin" issue
+// =============================================================================
+
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using TPAHRSystemSimple.Data;
@@ -7,85 +13,26 @@ using TPAHRSystemSimple.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // =============================================================================
-// LOGGING CONFIGURATION
+// BASIC SERVICES CONFIGURATION
 // =============================================================================
 
-Log.Logger = new LoggerConfiguration()
-    .WriteTo.Console()
-    .WriteTo.File("logs/tpa-hr-api-.log", rollingInterval: RollingInterval.Day)
-    .CreateLogger();
-
-builder.Host.UseSerilog();
-
-// =============================================================================
-// SERVICES CONFIGURATION
-// =============================================================================
-
-// Add controllers
-builder.Services.AddControllers();
-
-// Add API documentation
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new OpenApiInfo
+// Add controllers with minimal configuration
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
     {
-        Title = "TPA HR System API",
-        Version = "v1.0",
-        Description = "Simple HR Management System API with Session-based Authentication",
-        Contact = new OpenApiContact
-        {
-            Name = "TPA HR System",
-            Email = "support@tpahr.com"
-        }
+        // Prevent circular reference issues
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
     });
 
-    // Add Bearer token authentication to Swagger
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Description = "Session-based authentication. Enter your session token (without 'Bearer' prefix)",
-        Name = "Authorization",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.ApiKey,
-        Scheme = "Bearer",
-        BearerFormat = "Session Token"
-    });
-
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            Array.Empty<string>()
-        }
-    });
-
-    // Enable annotations for Swagger documentation
-    c.EnableAnnotations();
-});
-
-// =============================================================================
-// DATABASE CONFIGURATION
-// =============================================================================
-
+// Database context
 builder.Services.AddDbContext<TPADbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// =============================================================================
-// BUSINESS SERVICES (Simple classes, no interfaces)
-// =============================================================================
-
+// Add services
 builder.Services.AddScoped<AuthService>();
-// Note: Dashboard and Menu logic is handled directly in controllers for simplicity
 
 // =============================================================================
-// CORS CONFIGURATION (Fixed for credentials)
+// FIXED CORS CONFIGURATION
 // =============================================================================
 
 builder.Services.AddCors(options =>
@@ -100,68 +47,104 @@ builder.Services.AddCors(options =>
             )
             .AllowAnyMethod()
             .AllowAnyHeader()
-            .AllowCredentials()   // This requires specific origins, not AllowAnyOrigin
-            .WithExposedHeaders("Authorization", "X-Session-Token");
+            .AllowCredentials()
+            .WithExposedHeaders("Authorization", "X-Session-Token", "Content-Type");
     });
 
-    // Development only - very permissive (no credentials)
-    options.AddPolicy("DevelopmentCORS", policy =>
+    // Development-only policy for testing
+    options.AddPolicy("AllowAll", policy =>
     {
         policy.AllowAnyOrigin()
-            .AllowAnyMethod()
-            .AllowAnyHeader();
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
+// =============================================================================
+// SWAGGER CONFIGURATION
+// =============================================================================
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "TPA HR System API",
+        Version = "v1.0",
+        Description = "HR Management System API"
+    });
+
+    // Add Bearer token authentication
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
+    });
+
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement()
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new List<string>()
+        }
     });
 });
 
 var app = builder.Build();
 
 // =============================================================================
-// MIDDLEWARE PIPELINE (Order is important!)
+// MIDDLEWARE PIPELINE (ORDER IS CRITICAL!)
 // =============================================================================
 
-// Enable CORS FIRST (before other middleware)
+// 1. CORS must be first
 app.UseCors("AllowReactApp");
 
-// Enable Swagger in all environments for now
+// 2. Enable Swagger
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "TPA HR System API v1");
-    c.RoutePrefix = string.Empty; // Serve Swagger at root (https://localhost:7169/)
-    c.DocumentTitle = "TPA HR System API Documentation";
-    c.DefaultModelsExpandDepth(-1); // Hide schemas section by default
+    c.RoutePrefix = string.Empty; // Serve Swagger at root
 });
 
-// Enable HTTPS redirection
+// 3. HTTPS redirection
 app.UseHttpsRedirection();
 
-// Add global OPTIONS handler for CORS preflight
+// 4. Add explicit OPTIONS handling for CORS preflight
 app.Use(async (context, next) =>
 {
     if (context.Request.Method == "OPTIONS")
     {
+        context.Response.StatusCode = 200;
         context.Response.Headers.Add("Access-Control-Allow-Origin", "http://localhost:3000");
         context.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         context.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Token");
         context.Response.Headers.Add("Access-Control-Allow-Credentials", "true");
-        context.Response.StatusCode = 200;
+        await context.Response.WriteAsync("");
         return;
     }
     await next();
 });
 
-// Add request logging middleware
+// 5. Request logging
 app.Use(async (context, next) =>
 {
-    var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
-    logger.LogInformation($"🌐 {context.Request.Method} {context.Request.Path}");
-
+    Console.WriteLine($"🌐 {context.Request.Method} {context.Request.Path} from {context.Request.Headers.Origin}");
     await next();
-
-    logger.LogInformation($"📤 Response: {context.Response.StatusCode}");
+    Console.WriteLine($"📤 Response: {context.Response.StatusCode}");
 });
 
-// Map controllers
+// 6. Map controllers
 app.MapControllers();
 
 // =============================================================================
@@ -174,51 +157,38 @@ app.MapGet("/health", () => new
     timestamp = DateTime.UtcNow,
     service = "TPA HR System API",
     version = "1.0.0",
-    database = "Connected" // TODO: Add actual DB health check
+    cors = "enabled"
 }).WithTags("Health");
 
-app.MapGet("/api/info", () => new
+app.MapGet("/api/test", () => new
 {
-    name = "TPA HR Management System API",
-    version = "1.0.0",
-    description = "Simple HR Management System with Session-based Authentication",
-    features = new[]
-    {
-        "✅ Session-based Authentication",
-        "✅ Employee Management",
-        "✅ Onboarding Workflow",
-        "✅ Role-based Access Control",
-        "✅ Dashboard Analytics",
-        "🔄 Direct Database Integration"
-    },
-    endpoints = new
-    {
-        authentication = "/api/auth",
-        swagger = "/swagger"
-    },
-    frontend_compatibility = "React (localhost:3000)",
-    database = "SQL Server (existing TPAHRSystem database)"
-}).WithTags("Info");
+    success = true,
+    message = "API is working",
+    timestamp = DateTime.UtcNow,
+    port = 7169,
+    cors = "configured"
+}).WithTags("Test");
+
+// CORS test endpoint
+app.MapGet("/api/cors-test", () => new
+{
+    success = true,
+    message = "CORS is working",
+    timestamp = DateTime.UtcNow,
+    allowedOrigins = new[] { "http://localhost:3000", "https://localhost:3000" }
+}).WithTags("CORS");
 
 // =============================================================================
-// STARTUP MESSAGES
+// STARTUP
 // =============================================================================
 
-Console.WriteLine("🚀 TPA HR System API (Simple Edition) Starting...");
+Console.WriteLine("🚀 TPA HR System API Starting...");
 Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-Console.WriteLine("📋 Features:");
-Console.WriteLine("   ✅ Simple single-project architecture");
-Console.WriteLine("   ✅ Session-based authentication");
-Console.WriteLine("   ✅ Existing SQL Server database integration");
-Console.WriteLine("   ✅ React frontend compatibility");
-Console.WriteLine("   ✅ Swagger UI documentation");
-Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-Console.WriteLine("🌐 Endpoints:");
-Console.WriteLine("   📖 Swagger UI: https://localhost:7169/");
-Console.WriteLine("   🔐 Auth API: https://localhost:7169/api/auth");
-Console.WriteLine("   📊 Dashboard API: https://localhost:7169/api/dashboard");
-Console.WriteLine("   🧭 Menu API: https://localhost:7169/api/menu");
-Console.WriteLine("   ❤️  Health: https://localhost:7169/health");
+Console.WriteLine("📖 Swagger UI: https://localhost:7169/");
+Console.WriteLine("❤️  Health: https://localhost:7169/health");
+Console.WriteLine("🧪 Test: https://localhost:7169/api/test");
+Console.WriteLine("🌐 CORS Test: https://localhost:7169/api/cors-test");
+Console.WriteLine("🔗 React Origin: http://localhost:3000 ✅ ALLOWED");
 Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
 app.Run();
