@@ -4,12 +4,13 @@ using Microsoft.AspNetCore.Cors;
 using TPAHRSystemSimple.Data;
 using TPAHRSystemSimple.Models;
 using TPAHRSystemSimple.Services;
+using System.ComponentModel.DataAnnotations;
 
 namespace TPAHRSystemSimple.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [EnableCors("AllowReactApp")] // Enable CORS for this controller
+    [EnableCors("AllowReactApp")]
     public class AuthController : ControllerBase
     {
         private readonly AuthService _authService;
@@ -24,71 +25,180 @@ namespace TPAHRSystemSimple.Controllers
         }
 
         // =============================================================================
-        // AUTHENTICATION ENDPOINTS
+        // AUTHENTICATION ENDPOINTS (MATCHING ORIGINAL API EXACTLY)
         // =============================================================================
 
         /// <summary>
         /// Login with email and password
         /// </summary>
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        public async Task<IActionResult> Login([FromBody] LoginRequestModel request)
         {
             try
             {
+                // Add CORS headers manually for extra compatibility
+                Response.Headers.Add("Access-Control-Allow-Origin", "*");
+                Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
                 if (!ModelState.IsValid)
                 {
-                    return BadRequest(ApiResponse<object>.ErrorResult("Invalid input data"));
+                    return BadRequest(new { success = false, message = "Invalid input data" });
                 }
 
                 var ipAddress = GetClientIpAddress();
                 var userAgent = Request.Headers.UserAgent.ToString();
 
-                var result = await _authService.LoginAsync(request, ipAddress, userAgent);
+                var loginRequest = new LoginRequest
+                {
+                    Email = request.Email,
+                    Password = request.Password
+                };
+
+                var result = await _authService.LoginAsync(loginRequest, ipAddress, userAgent);
 
                 if (result.Success)
                 {
                     _logger.LogInformation($"User logged in successfully: {request.Email}");
-                    return Ok(result);
+
+                    // Return EXACT format that frontend expects
+                    return Ok(new
+                    {
+                        success = true,
+                        message = result.Message,
+                        token = result.Token,      // Session token for Authorization header
+                        user = result.User,        // User data  
+                        employee = result.Employee // Employee data if exists
+                    });
                 }
 
                 _logger.LogWarning($"Login failed for user: {request.Email} - {result.Message}");
-                return Unauthorized(result);
+                return Unauthorized(new
+                {
+                    success = false,
+                    message = result.Message,
+                    token = (string?)null,
+                    user = (object?)null,
+                    employee = (object?)null
+                });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Error during login for email: {request.Email}");
-                return StatusCode(500, ApiResponse<object>.ErrorResult("An error occurred during login"));
+                return StatusCode(500, new { success = false, message = "An error occurred during login" });
             }
         }
 
         /// <summary>
-        /// Logout and invalidate session
+        /// Handle CORS preflight requests
+        /// </summary>
+        [HttpOptions("login")]
+        public IActionResult PreflightLogin()
+        {
+            return Ok();
+        }
+
+        /// <summary>
+        /// Logout and invalidate session (MATCHING ORIGINAL API)
         /// </summary>
         [HttpPost("logout")]
-        public async Task<IActionResult> Logout()
+        public async Task<IActionResult> Logout([FromBody] LogoutRequestModel? request = null)
         {
             try
             {
-                var sessionToken = GetSessionToken();
+                string? sessionToken = null;
+
+                // Try to get token from request body first (original behavior)
+                if (request != null && !string.IsNullOrEmpty(request.Token))
+                {
+                    sessionToken = request.Token;
+                }
+                else
+                {
+                    // Fallback to Authorization header
+                    sessionToken = GetSessionToken();
+                }
+
                 if (string.IsNullOrEmpty(sessionToken))
                 {
-                    return Ok(ApiResponse<object>.SuccessResult(null, "Already logged out"));
+                    return Ok(new { success = true, message = "Already logged out" });
                 }
 
                 var success = await _authService.LogoutAsync(sessionToken);
 
-                if (success)
+                return Ok(new
                 {
-                    _logger.LogInformation("User logged out successfully");
-                    return Ok(ApiResponse<object>.SuccessResult(null, "Logged out successfully"));
-                }
-
-                return Ok(ApiResponse<object>.SuccessResult(null, "Session already invalidated"));
+                    success = success,
+                    message = success ? "Logout successful" : "Invalid token"
+                });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during logout");
-                return StatusCode(500, ApiResponse<object>.ErrorResult("An error occurred during logout"));
+                return StatusCode(500, new { success = false, message = "An error occurred during logout" });
+            }
+        }
+
+        /// <summary>
+        /// Validate token - required by frontend on app start (MATCHING ORIGINAL API EXACTLY)
+        /// </summary>
+        [HttpGet("validate")]
+        public async Task<IActionResult> ValidateToken([FromQuery] string token)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(token))
+                {
+                    return Unauthorized(new { success = false, message = "Token is required" });
+                }
+
+                // Use the EXACT same method as original API
+                var user = await _authService.ValidateSessionAsync(token);
+                if (user == null)
+                {
+                    return Unauthorized(new { success = false, message = "Invalid or expired token" });
+                }
+
+                // Get employee data if exists - SAME as original
+                var employee = await _context.Employees
+                    .Include(e => e.Department)
+                    .FirstOrDefaultAsync(e => e.UserId == user.Id);
+
+                // EXACT response format as original API that frontend expects
+                var response = new
+                {
+                    success = true,
+                    user = new
+                    {
+                        id = user.Id,
+                        email = user.Email,
+                        role = user.Role,
+                        isActive = user.IsActive,
+                        lastLogin = user.LastLogin,
+                        mustChangePassword = user.MustChangePassword
+                    },
+                    employee = employee != null ? new
+                    {
+                        id = employee.Id,
+                        employeeNumber = employee.EmployeeNumber,
+                        firstName = employee.FirstName,
+                        lastName = employee.LastName,
+                        fullName = employee.FullName,
+                        email = employee.Email,
+                        position = employee.Position,
+                        department = employee.Department?.Name,
+                        status = employee.Status,
+                        hireDate = employee.HireDate,
+                        onboardingCompletedDate = employee.OnboardingCompletedDate
+                    } : null
+                };
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating token");
+                return StatusCode(500, new { success = false, message = "An error occurred validating token" });
             }
         }
 
@@ -103,13 +213,13 @@ namespace TPAHRSystemSimple.Controllers
                 var sessionToken = GetSessionToken();
                 if (string.IsNullOrEmpty(sessionToken))
                 {
-                    return Unauthorized(ApiResponse<object>.ErrorResult("Not authenticated"));
+                    return Unauthorized(new { success = false, message = "Not authenticated" });
                 }
 
                 var user = await _authService.ValidateSessionAsync(sessionToken);
                 if (user == null)
                 {
-                    return Unauthorized(ApiResponse<object>.ErrorResult("Session expired or invalid"));
+                    return Unauthorized(new { success = false, message = "Session expired or invalid" });
                 }
 
                 // Get employee data if exists
@@ -117,40 +227,41 @@ namespace TPAHRSystemSimple.Controllers
                     .Include(e => e.Department)
                     .FirstOrDefaultAsync(e => e.UserId == user.Id);
 
-                var response = new AuthStatusResponse
+                var response = new
                 {
-                    IsAuthenticated = true,
-                    User = new UserDto
+                    success = true,
+                    isAuthenticated = true,
+                    user = new
                     {
-                        Id = user.Id,
-                        Email = user.Email,
-                        Role = user.Role,
-                        IsActive = user.IsActive,
-                        LastLogin = user.LastLogin,
-                        MustChangePassword = user.MustChangePassword
+                        id = user.Id,
+                        email = user.Email,
+                        role = user.Role,
+                        isActive = user.IsActive,
+                        lastLogin = user.LastLogin,
+                        mustChangePassword = user.MustChangePassword
                     },
-                    Employee = employee != null ? new EmployeeDto
+                    employee = employee != null ? new
                     {
-                        Id = employee.Id,
-                        EmployeeNumber = employee.EmployeeNumber,
-                        FirstName = employee.FirstName,
-                        LastName = employee.LastName,
-                        FullName = employee.FullName,
-                        Email = employee.Email,
-                        Position = employee.Position,
-                        Department = employee.Department?.Name,
-                        Status = employee.Status,
-                        HireDate = employee.HireDate,
-                        OnboardingCompletedDate = employee.OnboardingCompletedDate
+                        id = employee.Id,
+                        employeeNumber = employee.EmployeeNumber,
+                        firstName = employee.FirstName,
+                        lastName = employee.LastName,
+                        fullName = employee.FullName,
+                        email = employee.Email,
+                        position = employee.Position,
+                        department = employee.Department?.Name,
+                        status = employee.Status,
+                        hireDate = employee.HireDate,
+                        onboardingCompletedDate = employee.OnboardingCompletedDate
                     } : null
                 };
 
-                return Ok(ApiResponse<AuthStatusResponse>.SuccessResult(response));
+                return Ok(response);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting current user");
-                return StatusCode(500, ApiResponse<object>.ErrorResult("An error occurred"));
+                return StatusCode(500, new { success = false, message = "An error occurred" });
             }
         }
 
@@ -170,19 +281,19 @@ namespace TPAHRSystemSimple.Controllers
         }
 
         // =============================================================================
-        // HELPER METHODS
+        // HELPER METHODS (MATCHING ORIGINAL API EXACTLY)
         // =============================================================================
 
         private string? GetSessionToken()
         {
-            // Try Bearer token first (standard)
+            // EXACT same logic as original - try Authorization header first
             var authHeader = Request.Headers.Authorization.FirstOrDefault();
             if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
             {
                 return authHeader["Bearer ".Length..].Trim();
             }
 
-            // Try X-Session-Token header (custom)
+            // Try X-Session-Token header as fallback
             var sessionHeader = Request.Headers["X-Session-Token"].FirstOrDefault();
             if (!string.IsNullOrEmpty(sessionHeader))
             {
@@ -194,7 +305,7 @@ namespace TPAHRSystemSimple.Controllers
 
         private string? GetClientIpAddress()
         {
-            // Try to get the real IP from reverse proxy headers
+            // EXACT same logic as original
             var xForwardedFor = Request.Headers["X-Forwarded-For"].FirstOrDefault();
             if (!string.IsNullOrEmpty(xForwardedFor))
             {
@@ -207,8 +318,26 @@ namespace TPAHRSystemSimple.Controllers
                 return xRealIp;
             }
 
-            // Fall back to connection remote IP
             return HttpContext.Connection.RemoteIpAddress?.ToString();
         }
+    }
+
+    // =============================================================================
+    // REQUEST MODELS (SIMPLE CLASSES FOR CONTROLLER USE)
+    // =============================================================================
+
+    public class LoginRequestModel
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        public string Password { get; set; } = string.Empty;
+    }
+
+    public class LogoutRequestModel
+    {
+        public string Token { get; set; } = string.Empty;
     }
 }

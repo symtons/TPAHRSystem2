@@ -87,6 +87,9 @@ namespace TPAHRSystemSimple.Services
                     .Include(e => e.Department)
                     .FirstOrDefaultAsync(e => e.UserId == user.Id);
 
+                // Log successful login activity (DATABASE-DRIVEN)
+                await LogLoginActivityAsync(user, employee, ipAddress);
+
                 _logger.LogInformation($"Login successful for user: {request.Email}");
 
                 return new LoginResponse
@@ -110,11 +113,64 @@ namespace TPAHRSystemSimple.Services
         }
 
         // =============================================================================
-        // SESSION MANAGEMENT
+        // DATABASE-DRIVEN ACTIVITY LOGGING
+        // =============================================================================
+
+        private async Task LogLoginActivityAsync(User user, Employee? employee, string? ipAddress)
+        {
+            try
+            {
+                // Find or create login activity type
+                var activityType = await _context.ActivityTypes
+                    .FirstOrDefaultAsync(at => at.Name == "Login" && at.IsActive);
+
+                if (activityType == null)
+                {
+                    // Create login activity type if it doesn't exist
+                    activityType = new ActivityType
+                    {
+                        Name = "Login",
+                        Description = "User login event",
+                        IconName = "Login",
+                        Color = "#4caf50",
+                        IsActive = true,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.ActivityTypes.Add(activityType);
+                    await _context.SaveChangesAsync();
+                }
+
+                // Create login activity record
+                var activity = new RecentActivity
+                {
+                    UserId = user.Id,
+                    EmployeeId = employee?.Id,
+                    ActivityTypeId = activityType.Id,
+                    Title = "User Login",
+                    Description = $"Successful login from {ipAddress ?? "unknown location"}",
+                    Metadata = $"{{\"ipAddress\": \"{ipAddress}\", \"role\": \"{user.Role}\"}}",
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _context.RecentActivities.Add(activity);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"Login activity logged for user: {user.Email}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to log login activity for user: {user.Email}");
+                // Don't throw - login should still succeed even if activity logging fails
+            }
+        }
+
+        // =============================================================================
+        // SESSION MANAGEMENT (MATCHING ORIGINAL API)
         // =============================================================================
 
         public async Task<string> CreateSessionAsync(User user, string? ipAddress, string? userAgent)
         {
+            // Use 64-byte token like the original (not 32-byte)
             var sessionToken = GenerateSessionToken();
             var expiresAt = DateTime.UtcNow.AddHours(SessionTimeoutHours);
 
@@ -137,7 +193,7 @@ namespace TPAHRSystemSimple.Services
 
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Session created for user ID: {user.Id}");
+            _logger.LogInformation($"Session created for user ID: {user.Id}, expires: {expiresAt}");
             return sessionToken;
         }
 
@@ -146,18 +202,23 @@ namespace TPAHRSystemSimple.Services
             if (string.IsNullOrEmpty(sessionToken))
                 return null;
 
-            var session = await _context.UserSessions
-                .Include(s => s.User)
-                .FirstOrDefaultAsync(s => s.SessionToken == sessionToken
-                                       && s.IsActive
-                                       && s.ExpiresAt > DateTime.UtcNow);
-
-            if (session?.User != null && session.User.IsActive)
+            try
             {
-                return session.User;
-            }
+                // EXACT same logic as original API - no IsActive check on User here
+                var session = await _context.UserSessions
+                    .Include(s => s.User)
+                    .FirstOrDefaultAsync(s => s.SessionToken == sessionToken
+                                           && s.IsActive
+                                           && s.ExpiresAt > DateTime.UtcNow);
 
-            return null;
+                // Return user directly if session exists and is valid (original behavior)
+                return session?.User;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error validating session token");
+                return null;
+            }
         }
 
         public async Task<bool> LogoutAsync(string sessionToken)
@@ -165,7 +226,7 @@ namespace TPAHRSystemSimple.Services
             try
             {
                 var session = await _context.UserSessions
-                    .FirstOrDefaultAsync(s => s.SessionToken == sessionToken);
+                    .FirstOrDefaultAsync(s => s.SessionToken == sessionToken && s.IsActive);
 
                 if (session != null)
                 {
@@ -185,7 +246,7 @@ namespace TPAHRSystemSimple.Services
         }
 
         // =============================================================================
-        // PASSWORD UTILITIES
+        // PASSWORD & TOKEN UTILITIES (MATCHING ORIGINAL)
         // =============================================================================
 
         private static bool VerifyPassword(string password, string hash, string salt)
@@ -196,6 +257,7 @@ namespace TPAHRSystemSimple.Services
 
         public static string ComputeHash(string password, string salt)
         {
+            // EXACT same algorithm as original
             var combined = password + salt;
             using var sha256 = SHA256.Create();
             var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(combined));
@@ -212,7 +274,8 @@ namespace TPAHRSystemSimple.Services
 
         private static string GenerateSessionToken()
         {
-            var tokenBytes = new byte[32];
+            // EXACT same as original - 64 bytes (not 32)
+            var tokenBytes = new byte[64];
             using var rng = RandomNumberGenerator.Create();
             rng.GetBytes(tokenBytes);
             return Convert.ToBase64String(tokenBytes);

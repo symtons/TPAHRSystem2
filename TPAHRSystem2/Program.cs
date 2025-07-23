@@ -82,10 +82,10 @@ builder.Services.AddDbContext<TPADbContext>(options =>
 // =============================================================================
 
 builder.Services.AddScoped<AuthService>();
-// We'll add more services later (OnboardingService, EmployeeService, etc.)
+// Note: Dashboard and Menu logic is handled directly in controllers for simplicity
 
 // =============================================================================
-// CORS CONFIGURATION
+// CORS CONFIGURATION (Fixed for credentials)
 // =============================================================================
 
 builder.Services.AddCors(options =>
@@ -95,40 +95,60 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(
                 "http://localhost:3000",
                 "https://localhost:3000",
-                "http://localhost:3001",
-                "https://localhost:3001",
                 "http://127.0.0.1:3000",
                 "https://127.0.0.1:3000"
             )
             .AllowAnyMethod()
             .AllowAnyHeader()
-            .AllowCredentials()
-            .SetIsOriginAllowed(origin => true) // Allow any origin for development
+            .AllowCredentials()   // This requires specific origins, not AllowAnyOrigin
             .WithExposedHeaders("Authorization", "X-Session-Token");
+    });
+
+    // Development only - very permissive (no credentials)
+    options.AddPolicy("DevelopmentCORS", policy =>
+    {
+        policy.AllowAnyOrigin()
+            .AllowAnyMethod()
+            .AllowAnyHeader();
     });
 });
 
 var app = builder.Build();
 
 // =============================================================================
-// MIDDLEWARE PIPELINE
+// MIDDLEWARE PIPELINE (Order is important!)
 // =============================================================================
 
-// Enable Swagger in all environments for now (you can restrict to Development later)
+// Enable CORS FIRST (before other middleware)
+app.UseCors("AllowReactApp");
+
+// Enable Swagger in all environments for now
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "TPA HR System API v1");
-    c.RoutePrefix = string.Empty; // Serve Swagger at root (https://localhost:7062/)
+    c.RoutePrefix = string.Empty; // Serve Swagger at root (https://localhost:7169/)
     c.DocumentTitle = "TPA HR System API Documentation";
     c.DefaultModelsExpandDepth(-1); // Hide schemas section by default
 });
 
-// Enable CORS
-app.UseCors("AllowReactApp");
-
 // Enable HTTPS redirection
 app.UseHttpsRedirection();
+
+// Add global OPTIONS handler for CORS preflight
+app.Use(async (context, next) =>
+{
+    if (context.Request.Method == "OPTIONS")
+    {
+        context.Response.Headers.Add("Access-Control-Allow-Origin", "http://localhost:3000");
+        context.Response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        context.Response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-Token");
+        context.Response.Headers.Add("Access-Control-Allow-Credentials", "true");
+        context.Response.StatusCode = 200;
+        return;
+    }
+    await next();
+});
 
 // Add request logging middleware
 app.Use(async (context, next) =>
@@ -194,9 +214,11 @@ Console.WriteLine("   ✅ React frontend compatibility");
 Console.WriteLine("   ✅ Swagger UI documentation");
 Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 Console.WriteLine("🌐 Endpoints:");
-Console.WriteLine("   📖 Swagger UI: https://localhost:7062/");
-Console.WriteLine("   🔐 Auth API: https://localhost:7062/api/auth");
-Console.WriteLine("   ❤️  Health: https://localhost:7062/health");
+Console.WriteLine("   📖 Swagger UI: https://localhost:7169/");
+Console.WriteLine("   🔐 Auth API: https://localhost:7169/api/auth");
+Console.WriteLine("   📊 Dashboard API: https://localhost:7169/api/dashboard");
+Console.WriteLine("   🧭 Menu API: https://localhost:7169/api/menu");
+Console.WriteLine("   ❤️  Health: https://localhost:7169/health");
 Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
 app.Run();
